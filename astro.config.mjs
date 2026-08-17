@@ -16,8 +16,8 @@ export default defineConfig({
       ],
       sidebar: [
         {
-          label: "Reference",
-          items: [{ autogenerate: { directory: "reference" } }],
+          label: "Configuration du serveur",
+          items: [{ autogenerate: { directory: "0-server-config" } }],
         },
       ],
     }),
