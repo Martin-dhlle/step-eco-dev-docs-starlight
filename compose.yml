@@ -1,0 +1,49 @@
+name: step-eco-server-docs
+
+services:
+  docs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: step-eco-server-docs:${APP_IMAGE_TAG:-latest}
+    container_name: step-eco-server-docs
+    restart: unless-stopped
+
+    expose:
+      - "8080"
+
+    networks:
+      - caddy
+
+    labels:
+      caddy: "http://${DOCS_HOST:-docs.dev.step.eco}"
+      caddy.import: "dev_access"
+      caddy.reverse_proxy: "step-eco-server-docs:8080"
+      caddy.reverse_proxy.header_up_0: "X-Forwarded-Proto {http.request.header.X-Forwarded-Proto}"
+      caddy.reverse_proxy.header_up_1: "X-Forwarded-For {http.request.header.X-Forwarded-For}"
+      caddy_ingress_network: "caddy"
+
+      homepage.group: "Applications"
+      homepage.name: "Documentation serveur"
+      homepage.href: "https://${DOCS_HOST:-docs.dev.step.eco}"
+      homepage.description: "Documentation du serveur de développement step.eco"
+
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --output-document=/dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  caddy:
+    external: true
+

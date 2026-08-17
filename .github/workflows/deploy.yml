@@ -1,0 +1,67 @@
+name: Build and deploy documentation
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  ASTRO_TELEMETRY_DISABLED: 1
+  NODE_VERSION: 24
+
+jobs:
+  build:
+    name: Build Astro
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build static site
+        run: npm run build
+
+  deploy:
+    name: Deploy to development VPS
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: development
+    concurrency:
+      group: docs-development-deployment
+      cancel-in-progress: false
+    steps:
+      - name: Update the application over SSH
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        env:
+          DEPLOY_SHA: ${{ github.sha }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          fingerprint: ${{ secrets.VPS_SSH_FINGERPRINT }}
+          envs: DEPLOY_SHA
+          command_timeout: 10m
+          script: |
+            set -eu
+            cd /home/martin/step-eco-server-docs
+            git fetch --prune origin main
+            git checkout --detach "$DEPLOY_SHA"
+            APP_IMAGE_TAG="$DEPLOY_SHA" docker compose up --detach --build --wait --wait-timeout 120 --remove-orphans
+            docker compose ps
