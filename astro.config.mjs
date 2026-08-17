@@ -12,8 +12,8 @@ export default defineConfig({
       social: [
         {
           icon: "github",
-          label: "GitHub",
-          href: "https://github.com/withastro/starlight",
+          label: "GitHub Studio",
+          href: "https://github.com/StudioFabrique",
         },
       ],
       sidebar: [
