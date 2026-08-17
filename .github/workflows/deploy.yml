@@ -46,7 +46,21 @@ jobs:
       group: docs-development-deployment
       cancel-in-progress: false
     steps:
-      - name: Update the application over SSH
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Copy application files to the VPS
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          source: ".dockerignore,Dockerfile,compose.yml,nginx,public,src,astro.config.mjs,package.json,package-lock.json,tsconfig.json"
+          target: "/home/martin/step-eco-server-docs"
+          rm: true
+
+      - name: Build and start the application
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         env:
           DEPLOY_SHA: ${{ github.sha }}
@@ -60,7 +74,6 @@ jobs:
           script: |
             set -eu
             cd /home/martin/step-eco-server-docs
-            git fetch --prune origin main
-            git checkout --detach "$DEPLOY_SHA"
+            docker network inspect caddy >/dev/null
             APP_IMAGE_TAG="$DEPLOY_SHA" docker compose up --detach --build --wait --wait-timeout 120 --remove-orphans
             docker compose ps
