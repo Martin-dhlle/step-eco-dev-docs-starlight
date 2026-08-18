@@ -21,6 +21,10 @@ export default defineConfig({
           label: "Configuration du serveur",
           items: [{ autogenerate: { directory: "0-server-config" } }],
         },
+        {
+          label: "Publication d’une application",
+          items: [{ autogenerate: { directory: "1-publication-application" } }],
+        },
       ],
     }),
   ],
