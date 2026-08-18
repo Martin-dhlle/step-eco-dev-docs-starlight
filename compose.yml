@@ -23,13 +23,17 @@ services:
       caddy.reverse_proxy.header_up_1: "X-Forwarded-For {http.request.header.X-Forwarded-For}"
       caddy_ingress_network: "caddy"
 
-      homepage.group: "Applications"
-      homepage.name: "Documentation serveur"
+      homepage.group: "Documentation"
+      homepage.name: "Documentation mise en place du serveur"
       homepage.href: "https://${DOCS_HOST:-docs.dev.step.eco}"
       homepage.description: "Documentation du serveur de développement step.eco"
 
     healthcheck:
-      test: ["CMD-SHELL", "wget --quiet --output-document=/dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      test:
+        [
+          "CMD-SHELL",
+          "wget --quiet --output-document=/dev/null http://127.0.0.1:8080/healthz || exit 1",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -46,4 +50,3 @@ services:
 networks:
   caddy:
     external: true
-
