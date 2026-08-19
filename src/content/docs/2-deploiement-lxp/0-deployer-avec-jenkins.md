@@ -7,10 +7,17 @@ Le dépôt LXP conserve deux pipelines Jenkins. Les deux récupèrent les images
 Docker, préparent les bases, appliquent les migrations Prisma et installent les
 triggers ANDRIA.
 
-| Mode | Jenkinsfile | Accès public |
-| --- | --- | --- |
-| Direct | `deployment/direct/Jenkinsfile` | Le conteneur `app` publie le port 80 du VPS |
-| Caddy | `deployment/caddy/Jenkinsfile` | Le conteneur `app` rejoint le réseau externe `caddy` et porte les labels du proxy partagé |
+:::caution[Pipeline hérité]
+Le credential `APP_ENV` décrit sur cette page correspond au pipeline LXP actuel.
+Ne le reproduisez pas dans un nouveau job. La cible de migration utilise
+[Infisical comme source de vérité](/1-publication-application/1-gerer-les-secrets/),
+le chemin `/ci` dans Jenkins et le chemin `/runtime` sur le VPS.
+:::
+
+| Mode   | Jenkinsfile                     | Accès public                                                                              |
+| ------ | ------------------------------- | ----------------------------------------------------------------------------------------- |
+| Direct | `deployment/direct/Jenkinsfile` | Le conteneur `app` publie le port 80 du VPS                                               |
+| Caddy  | `deployment/caddy/Jenkinsfile`  | Le conteneur `app` rejoint le réseau externe `caddy` et porte les labels du proxy partagé |
 
 Le mode Caddy ne déploie aucun conteneur Caddy. Le proxy reste dans
 `/home/martin/caddy-step-http` et lit les labels Docker. Le dépôt LXP n'a plus de
@@ -39,18 +46,18 @@ docker network inspect caddy
 docker ps --filter name=caddy
 ```
 
-## Créer les credentials Jenkins
+## Créer les credentials Jenkins actuels
 
 Les deux pipelines utilisent les IDs suivants :
 
-| ID | Type | Contenu |
-| --- | --- | --- |
-| `APP_ENV` | Secret file | fichier d'environnement applicatif |
-| `APP_SSH_HOST` | Secret text | adresse IP ou nom SSH du serveur |
-| `DOCKER_REGISTRY` | Username with password | compte Docker Hub et jeton |
-| `SSH_USER` | Secret text | compte Linux du serveur |
-| `SSH_PORT` | Secret text | port SSH |
-| `SSH_TARGET` | Secret text | répertoire sous `/home/<SSH_USER>` |
+| ID                | Type                          | Contenu                             |
+| ----------------- | ----------------------------- | ----------------------------------- |
+| `APP_ENV`         | Secret file                   | fichier d'environnement applicatif  |
+| `APP_SSH_HOST`    | Secret text                   | adresse IP ou nom SSH du serveur    |
+| `DOCKER_REGISTRY` | Username with password        | compte Docker Hub et jeton          |
+| `SSH_USER`        | Secret text                   | compte Linux du serveur             |
+| `SSH_PORT`        | Secret text                   | port SSH                            |
+| `SSH_TARGET`      | Secret text                   | répertoire sous `/home/<SSH_USER>`  |
 | `SSH_CREDENTIALS` | SSH Username with private key | clé privée du compte de déploiement |
 
 Le job configuré avec **Pipeline script from SCM** utilise aussi le credential
@@ -58,8 +65,8 @@ Git qui donne accès au dépôt LXP.
 
 Le mode Caddy ajoute ce credential :
 
-| ID | Type | Contenu |
-| --- | --- | --- |
+| ID           | Type        | Contenu                                                |
+| ------------ | ----------- | ------------------------------------------------------ |
 | `APP_DOMAIN` | Secret text | domaine sans protocole, par exemple `lxp.dev.step.eco` |
 
 Le Jenkinsfile injecte `APP_DOMAIN` dans la variable Compose `DEV_APP_HOST`.
@@ -67,7 +74,7 @@ Supprimez les anciens credentials `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
 `OVH_APPLICATION_SECRET` et `OVH_CONSUMER_KEY` si aucun autre job ne les
 utilise. Le proxy partagé gère la configuration Caddy.
 
-## Préparer `APP_ENV`
+## Préparer `APP_ENV` pendant la migration
 
 Créez un fichier hors du dépôt, ajoutez-le à Jenkins sous l'ID `APP_ENV`, puis
 remplacez chaque valeur entre chevrons :

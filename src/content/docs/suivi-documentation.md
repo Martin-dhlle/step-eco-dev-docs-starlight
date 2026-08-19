@@ -8,7 +8,6 @@ Ce tableau classe les sujets selon l’état de leur documentation. Une carte pa
 ```mermaid
 kanban
   todo[À documenter]
-    gestion des secrets avec Infisical et docker secrets
     backups[Sauvegardes et restauration]
     monitoring[Supervision et alertes]
   inProgress[En cours]
@@ -17,6 +16,7 @@ kanban
     dns[Configuration DNS]
   done[Documenté]
     appDeployment[Publication d'une application sur le VPS]
+    secretManagement[Gestion des secrets avec Infisical et Docker Compose]
     lxpJenkins[LXP - déploiement avec Jenkins]
     lxpActions[LXP - déploiement avec GitHub Actions]
 ```

@@ -29,6 +29,10 @@ Astro écrit le site statique dans `dist/`.
 
 ## Déploiement GitHub Actions
 
+> Le workflow de ce dépôt utilise encore les GitHub Secrets historiques. Ne
+> reproduisez pas ce montage dans un nouveau projet. La norme cible utilise
+> [Infisical, OIDC et une Machine Identity sur le VPS](src/content/docs/1-publication-application/1-gerer-les-secrets.md).
+
 Le workflow `.github/workflows/deploy.yml` contrôle le build de chaque pull request vers `main`. Un push sur `main`, ou un lancement manuel depuis `main`, exécute le déploiement suivant :
 
 1. GitHub Actions récupère le commit et contrôle le build Astro.
