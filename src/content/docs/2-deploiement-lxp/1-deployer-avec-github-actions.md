@@ -11,6 +11,13 @@ Le workflow construit `studiostep/lxp:dev-<sha>`, publie l'image sur Docker Hub,
 puis déploie la stack dans `/home/martin/lxp-dev`. Il utilise le tag du commit au
 lieu de `latest`. Le service IA garde le tag `studiostep/lxp-ai:latest`.
 
+:::Point d'attention[Pipeline hérité]
+Les GitHub Secrets `APP_ENV` et `REGISTRY_TOKEN` décrits sur cette page
+correspondent au workflow LXP actuel. Les nouveaux workflows suivent la
+[norme Infisical](/1-publication-application/1-gerer-les-secrets/) : OIDC donne
+accès à `/ci`, tandis que le VPS charge `/runtime` avec sa Machine Identity.
+:::
+
 ## Préparer le VPS
 
 Le compte `martin` doit se connecter par clé SSH, écrire dans son répertoire et
@@ -40,19 +47,19 @@ le réseau interne `lxp-dev_backend`. Le service `ai` utilise
 `lxp-dev_egress` pour appeler Mistral et Hugging Face. Aucun service LXP ne publie
 de port sur l'hôte.
 
-## Configurer l'environnement GitHub
+## Configurer l'environnement GitHub actuel
 
 Créez un environnement GitHub nommé `development`, puis ajoutez ces secrets :
 
-| Secret | Valeur |
-| --- | --- |
-| `APP_ENV` | contenu du fichier applicatif décrit dans la page Jenkins |
-| `REGISTRY_USER` | compte Docker Hub autorisé à publier `studiostep/lxp` |
-| `REGISTRY_TOKEN` | jeton Docker Hub du compte |
-| `VPS_HOST` | adresse IP ou nom SSH du VPS |
-| `VPS_USERNAME` | `martin` |
-| `VPS_SSH_PRIVATE_KEY` | clé privée dédiée au déploiement |
-| `VPS_SSH_PORT` | port SSH, facultatif si le serveur utilise `22` |
+| Secret                | Valeur                                                    |
+| --------------------- | --------------------------------------------------------- |
+| `APP_ENV`             | contenu du fichier applicatif décrit dans la page Jenkins |
+| `REGISTRY_USER`       | compte Docker Hub autorisé à publier `studiostep/lxp`     |
+| `REGISTRY_TOKEN`      | jeton Docker Hub du compte                                |
+| `VPS_HOST`            | adresse IP ou nom SSH du VPS                              |
+| `VPS_USERNAME`        | `martin`                                                  |
+| `VPS_SSH_PRIVATE_KEY` | clé privée dédiée au déploiement                          |
+| `VPS_SSH_PORT`        | port SSH, facultatif si le serveur utilise `22`           |
 
 Ajoutez la clé publique associée à `VPS_SSH_PRIVATE_KEY` dans
 `/home/martin/.ssh/authorized_keys`.
