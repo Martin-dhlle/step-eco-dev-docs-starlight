@@ -13,7 +13,7 @@ export default defineConfig({
       enableLog: false,
     }),
     starlight({
-      title: "Serveur de développement step.eco",
+      title: "Docs dev.step.eco",
       social: [
         {
           icon: "github",
