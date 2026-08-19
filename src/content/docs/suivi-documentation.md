@@ -8,8 +8,7 @@ Ce tableau classe les sujets selon l’état de leur documentation. Une carte pa
 ```mermaid
 kanban
   todo[À documenter]
-    lxp - git action sur le VPS
-    lxp - jenkins en prod
+    gestion des secrets avec Infisical et docker secrets
     backups[Sauvegardes et restauration]
     monitoring[Supervision et alertes]
   inProgress[En cours]
@@ -18,6 +17,8 @@ kanban
     dns[Configuration DNS]
   done[Documenté]
     appDeployment[Publication d'une application sur le VPS]
+    lxpJenkins[LXP - déploiement avec Jenkins]
+    lxpActions[LXP - déploiement avec GitHub Actions]
 ```
 
 Mettez ce tableau à jour dans le même changement que la page concernée. Les cartes **En cours** correspondent à des pages présentes mais incomplètes. Les cartes **À documenter** n’ont pas encore de page dédiée.

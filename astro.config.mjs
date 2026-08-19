@@ -34,6 +34,10 @@ export default defineConfig({
           label: "Publication d’une application",
           items: [{ autogenerate: { directory: "1-publication-application" } }],
         },
+        {
+          label: "Déploiement du LXP",
+          items: [{ autogenerate: { directory: "2-deploiement-lxp" } }],
+        },
       ],
     }),
   ],
