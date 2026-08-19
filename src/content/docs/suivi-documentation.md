@@ -8,7 +8,8 @@ Ce tableau classe les sujets selon l’état de leur documentation. Une carte pa
 ```mermaid
 kanban
   todo[À documenter]
-    déploiements du lxp (caddy sur le VPS et jenkins en prod) - Priorité ++
+    lxp - git action sur le VPS
+    lxp - jenkins en prod
     backups[Sauvegardes et restauration]
     monitoring[Supervision et alertes]
   inProgress[En cours]
