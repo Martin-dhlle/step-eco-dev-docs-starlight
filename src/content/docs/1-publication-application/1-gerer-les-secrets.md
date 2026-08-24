@@ -143,9 +143,10 @@ prod
         └── /runtime
 ```
 
-Une instance de démonstration suit la même règle, dans l’environnement de
-développement : `dev` avec le préfixe `/demo` donne `/demo/ci` et
-`/demo/runtime`.
+Une instance de démonstration suit la même règle : c’est une cible publique,
+donc elle vit dans `prod`, et son préfixe `/demo` donne `/demo/ci` et
+`/demo/runtime`. Le critère n’est pas la nature de l’instance mais le niveau de
+soin que ses données réclament.
 
 `/common` porte ce qui ne varie pas : port d’écoute, modèle du fournisseur d’IA,
 serveur SMTP, réglages par défaut. Le dossier du client ne contient que ce qui
@@ -164,7 +165,7 @@ correspondant.
 | Développeur du projet           | `dev`         | `/runtime`          | lecture et écriture selon son rôle |
 | `<application>-dev-vps`         | `dev`         | `/runtime`          | lecture                            |
 | `<application>-github`          | `dev`         | `/ci` et `/runtime` | lecture                            |
-| `<application>-jenkins-demo`    | `dev`         | `/demo`             | lecture                            |
+| `<application>-prod-demo`       | `prod`        | `/demo`             | lecture                            |
 | `<application>-prod-<slug>`     | `prod`        | `/clients/<slug>`   | lecture                            |
 
 Créez une Machine Identity par application, environnement et consommateur. Une
@@ -223,6 +224,18 @@ projet et le domaine Infisical. Il ne contient aucun secret et peut rejoindre le
 dépôt.
 
 ## Travailler en local
+
+:::danger[Vérifiez la région avant tout]
+L’organisation est hébergée dans la région **EU** : `https://eu.infisical.com`.
+La CLI et l’action GitHub visent par défaut l’instance américaine, où les
+identités n’existent pas. Le symptôme est trompeur — un `401 Invalid
+credentials` avec des identifiants parfaitement valides, et un compteur
+`Last Logged In` qui reste vide.
+
+Passez donc le domaine partout : `--domain` sur **toutes** les commandes de la
+CLI, pas seulement le `login`, et l’entrée `domain:` de l’action GitHub.
+L’adresse s’écrit sans suffixe `/api`.
+:::
 
 Chaque développeur utilise son compte Infisical. N’utilisez pas une Machine
 Identity partagée sur les postes de travail.
@@ -351,7 +364,7 @@ APP_HOST=facturation.dev.step.eco
 APP_IMAGE=studiofabrique/facturation
 APP_IMAGE_TAG=1.4.2
 
-INFISICAL_DOMAIN=https://app.infisical.com
+INFISICAL_DOMAIN=https://eu.infisical.com
 INFISICAL_PROJECT_ID='<project-id>'
 INFISICAL_ENVIRONMENT=dev
 INFISICAL_CREDENTIALS_FILE=/home/martin/.config/infisical/facturation-dev.credentials
@@ -478,7 +491,7 @@ jobs:
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: dev
           secret-path: /ci
-          domain: https://app.infisical.com
+          domain: https://eu.infisical.com
 
       - name: Charger la configuration d’exécution
         uses: Infisical/secrets-action@<sha-validé>
@@ -488,7 +501,7 @@ jobs:
           project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: dev
           secret-path: /runtime
-          domain: https://app.infisical.com
+          domain: https://eu.infisical.com
 
       - name: Déployer
         run: ./deployment/deploy.sh

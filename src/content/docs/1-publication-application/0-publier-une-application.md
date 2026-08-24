@@ -207,7 +207,7 @@ APP_IMAGE_TAG=1.4.2
 POSTGRES_DB=facturation
 POSTGRES_USER=facturation
 
-INFISICAL_DOMAIN=https://app.infisical.com
+INFISICAL_DOMAIN=https://eu.infisical.com
 INFISICAL_PROJECT_ID='<project-id>'
 INFISICAL_ENVIRONMENT=dev
 INFISICAL_SECRET_PATH=/runtime

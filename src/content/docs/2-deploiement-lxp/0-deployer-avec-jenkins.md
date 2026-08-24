@@ -58,12 +58,22 @@ docker ps --filter name=caddy
 Créez une Machine Identity Infisical par instance déployée, avec Universal Auth
 et la lecture de `/ci` et `/runtime` sur son environnement.
 
-Enregistrez ensuite son Client ID et son Client Secret dans un unique credential
-Jenkins de type **Username with password** :
+Enregistrez ensuite son Client ID et son Client Secret dans un credential
+Jenkins de type **Username with password**, portant toujours le même identifiant :
 
-| ID               | Type                   | Contenu                       |
-| ---------------- | ---------------------- | ----------------------------- |
-| `INFISICAL_LXP`  | Username with password | Client ID et Client Secret    |
+| ID                      | Type                   | Contenu                    |
+| ----------------------- | ---------------------- | -------------------------- |
+| `INFISICAL_CREDENTIALS` | Username with password | Client ID et Client Secret |
+
+Créez-le **dans le dossier Jenkins de l'instance**, pas au niveau global. Jenkins
+résout un credential en remontant les portées : un job du dossier `demo` trouve
+d'abord le credential de ce dossier, un job du dossier `fnp` trouve le sien. Le
+même identifiant désigne donc un secret différent selon l'emplacement du job, et
+le Jenkinsfile reste identique pour toutes les instances.
+
+Un job placé hors dossier — la construction de l'image, par exemple — utilise le
+credential global du même nom, ou surcharge le paramètre
+`INFISICAL_CREDENTIAL_ID`.
 
 Ce credential remplace `APP_ENV`, `APP_DOMAIN`, `APP_SSH_HOST`, `SSH_USER`,
 `SSH_PORT`, `SSH_TARGET`, `SSH_CREDENTIALS` et `DOCKER_REGISTRY`. Supprimez-les
@@ -106,6 +116,7 @@ paramétré remplace ainsi un job par instance.
 
 | Paramètre                | Rôle                                                             |
 | ------------------------ | ---------------------------------------------------------------- |
+| `INFISICAL_CREDENTIAL_ID`| `INFISICAL_CREDENTIALS`, sauf job hors dossier                     |
 | `INFISICAL_PROJECT_ID`   | Project ID du projet LXP                                          |
 | `INFISICAL_ENVIRONMENT`  | slug Infisical : `dev`, `staging` ou `prod`                       |
 | `INFISICAL_PATH_PREFIX`  | vide, `/demo`, ou `/clients/<slug>` pour une instance cliente     |
@@ -154,8 +165,8 @@ Le mode Caddy vérifie le réseau externe `caddy` avant de toucher à la stack.
 ## Le mode démonstration
 
 Le plan Cloud gratuit d’Infisical n’inclut que trois environnements. La
-démonstration vit donc dans `dev`, sous le préfixe `/demo` : le wrapper lit
-`/demo/ci` et `/demo/runtime`.
+démonstration est donc un préfixe et non un environnement : elle vit dans
+`prod`, sous `/demo`, et le wrapper lit `/demo/ci` et `/demo/runtime`.
 
 `DEMO_MODE` y est une simple clé. Sur `true`, `deploy.sh` écarte la couche IA,
 remet la base à zéro, restaure le jeu de démonstration et prépare les deux
@@ -212,7 +223,7 @@ compatibilité des migrations.
 - [ ] La CLI `infisical` est installée sur les agents Jenkins.
 - [ ] Une Machine Identity existe par instance, avec `/ci` et `/runtime` en
       lecture sur son seul environnement.
-- [ ] Le credential `INFISICAL_LXP` porte le Client ID et le Client Secret.
+- [ ] Chaque dossier Jenkins porte son propre `INFISICAL_CREDENTIALS`.
 - [ ] Aucune métadonnée `LXP_*`, `DEPLOY_PATH` ou `APP_HOST` ne figure dans
       Infisical.
 - [ ] Les anciens credentials `APP_ENV`, `APP_DOMAIN`, `SSH_*` et
