@@ -8,117 +8,215 @@ s’applique aux nouvelles applications et à toute modification d’un pipeline
 existant.
 
 Git conserve le code, le contrat de configuration et les valeurs non sensibles.
-Infisical conserve les mots de passe, jetons, clés privées, certificats et URL qui
-contiennent des identifiants. Les développeurs et les pipelines récupèrent ces
-valeurs avec leur propre identité.
+Infisical conserve les mots de passe, jetons, clés privées, certificats et URL
+qui contiennent des identifiants. Les développeurs et les pipelines récupèrent
+ces valeurs avec leur propre identité.
 
 :::danger[Règle d’entreprise]
-Ne stockez aucun secret dans Git, Discord, une documentation, une image Docker ou
-un fichier `.env` persistant sur un serveur. Une valeur transmise par l’un de ces
-canaux doit être considérée comme compromise et faire l’objet d’une rotation.
+Ne stockez aucun secret dans Git, Discord, une documentation, une image Docker
+ou un fichier `.env` persistant sur un serveur. Une valeur transmise par l’un de
+ces canaux doit être considérée comme compromise et faire l’objet d’une
+rotation.
 :::
-
-```mermaid
-flowchart LR
-  Git[Git\ncode + .env.example + Compose] --> CI[GitHub Actions ou Jenkins]
-  CI -->|version à déployer| VPS[VPS Docker]
-  CI -->|OIDC ou Machine Identity\nchemin /ci| Infisical[Infisical]
-  VPS -->|Universal Auth\nchemin /runtime| Infisical
-  VPS --> Compose[Docker Compose]
-  Compose -->|fichiers /run/secrets| App[Conteneurs]
-```
-
-Le pipeline construit une image avec un tag immuable, la publie, puis demande au
-VPS de déployer ce tag. Le VPS récupère les secrets d’exécution. GitHub Actions et
-Jenkins n’accèdent pas au chemin `/runtime`.
 
 ## Classer les valeurs
 
 | Valeur                          | Emplacement                    | Exemple                                   |
 | ------------------------------- | ------------------------------ | ----------------------------------------- |
-| Contrat de configuration        | Git, dans `.env.example`       | noms des variables attendues              |
-| Configuration non sensible      | Git ou variable CI             | domaine, port, nom de base, tag d’image   |
+| Contrat de configuration        | Git, dans `env.example`        | noms des variables attendues              |
+| Métadonnée calculée par le job  | Pipeline uniquement            | tag de l’image, chemin cible, domaine     |
 | Secret d’exécution              | Infisical, chemin `/runtime`   | mot de passe de base, clé JWT, clé API    |
 | Secret de build ou de transport | Infisical, chemin `/ci`        | jeton de registre, clé SSH de déploiement |
 | Identifiant public Infisical    | Git ou variable CI             | Project ID, Project Slug, Identity ID     |
-| Secret d’amorçage du VPS        | fichier protégé hors du projet | Client Secret Universal Auth              |
+| Secret d’amorçage du serveur    | fichier protégé hors du projet | Client Secret Universal Auth              |
 
 Une URL comme `DATABASE_URL` devient un secret dès qu’elle contient un nom
-d’utilisateur ou un mot de passe. `APP_IMAGE_TAG`, `DEV_APP_HOST` et
-`POSTGRES_DB` peuvent rester dans un fichier `.deploy.env` versionné ou généré
-par le pipeline.
+d’utilisateur ou un mot de passe.
+
+Une métadonnée de déploiement ne va **jamais** dans Infisical. Le pipeline la
+recalcule à chaque exécution : une valeur figée dans le coffre déploierait une
+image périmée à la place de celle qui vient d’être construite.
+
+:::caution[Point d’attention]
+La configuration d’exécution non sensible — `POSTGRES_USER`, `SMTP_PORT`,
+`FRONT_URL` — a sa place dans `/runtime`, aux côtés des secrets. La séparer dans
+un second fichier oblige à maintenir deux sources par environnement, et une
+`DATABASE_URL` désynchronisée de son `POSTGRES_USER` est la première cause de
+déploiement cassé. Le critère est simple : si la valeur diffère d’une instance à
+l’autre et que le pipeline ne sait pas la calculer, elle va dans `/runtime`.
+:::
+
+## Choisir le point d’injection
+
+Deux topologies coexistent. La règle ci-dessus ne change pas ; le point où les
+secrets entrent dans le déploiement, si.
+
+| Critère                          | Mécanique A — stack hébergée | Mécanique B — CI pilote Docker  |
+| -------------------------------- | ---------------------------- | ------------------------------- |
+| Fichiers Compose                  | sur le serveur               | dans le dépôt, sur le runner    |
+| Qui crée les conteneurs           | le serveur                   | le runner, par `DOCKER_HOST`    |
+| Qui lit `/runtime`                | le serveur                   | le runner                       |
+| Qui lit `/ci`                     | la CI                        | le runner                       |
+| Amorçage sur le serveur           | fichier `.credentials`       | aucun                           |
+| Le serveur héberge               | Compose, `.deploy.env`, données | les données seules           |
+
+La mécanique A convient à une application déployée et redémarrée depuis le
+serveur. La mécanique B convient à un pipeline qui construit une image, la
+publie, puis pilote le démon Docker distant par SSH.
+
+:::caution[Point d’attention]
+Sur la mécanique B, refuser `/runtime` au runner ne protège rien : il contrôle
+déjà le démon Docker de la machine, donc un `docker exec` sur le conteneur
+applicatif révélerait les mêmes valeurs. La séparation `/ci` et `/runtime` y
+reste utile pour d’autres raisons — accorder `/runtime` à un développeur sans
+lui donner la clé SSH de déploiement, et distinguer les deux dans le journal
+d’audit — mais elle ne constitue pas une frontière de sécurité.
+:::
+
+```mermaid
+flowchart LR
+  Git[Git<br/>code + env.example + Compose] --> CI[GitHub Actions ou Jenkins]
+
+  subgraph A[Mécanique A]
+    CI -->|version à déployer| SrvA[Serveur]
+    SrvA -->|Universal Auth<br/>/runtime| InfA[Infisical]
+    SrvA --> ComposeA[Docker Compose]
+  end
+
+  subgraph B[Mécanique B]
+    CI -->|OIDC ou Universal Auth<br/>/ci + /runtime| InfB[Infisical]
+    CI -->|DOCKER_HOST=ssh://| SrvB[Démon Docker distant]
+  end
+```
 
 ## Organiser un projet Infisical
 
 Créez un projet Infisical par application déployable. Utilisez les mêmes noms de
-clés dans les environnements `dev`, `staging` et `prod`, avec des valeurs propres
-à chaque environnement.
+clés dans tous les environnements, avec des valeurs propres à chacun.
 
 ```text
 <application>
 ├── dev
-│   ├── /runtime
-│   └── /ci
+│   ├── /ci
+│   └── /runtime
 ├── staging
-│   ├── /runtime
-│   └── /ci
+│   ├── /ci
+│   └── /runtime
 └── prod
-    ├── /runtime
-    └── /ci
+    ├── /ci
+    └── /runtime
 ```
 
 - `/runtime` contient les valeurs consommées par les conteneurs ;
 - `/ci` contient les valeurs nécessaires au build et au transport de la release.
 
-Ajoutez un sous-dossier par service lorsque deux services demandent des droits
-différents, par exemple `/runtime/web` et `/runtime/worker`. N’accordez pas un
-accès récursif à la racine du projet pour contourner cette séparation.
+Le plan Cloud gratuit d’Infisical inclut ces trois environnements. Toute autre
+cible — une démonstration, une instance cliente — est un **préfixe de chemin**
+dans l’un d’eux, jamais un quatrième environnement.
 
 Nommez les secrets en majuscules avec des underscores : `DATABASE_PASSWORD`,
 `JWT_SIGNING_KEY` ou `SMTP_PASSWORD`. Renseignez leur propriétaire, leurs
 consommateurs et leur date de rotation dans les métadonnées Infisical.
 
+### Héberger plusieurs instances clientes
+
+Une application vendue à plusieurs organismes tourne sur autant d’instances, sur
+autant de domaines. Ces instances sont des **dossiers**, pas des environnements.
+
+Deux raisons. La liste des environnements est fixée par le plan Infisical, et le
+plan Cloud gratuit en compte trois. Et même sans cette limite, un environnement
+par client encombrerait chaque vue et chaque politique d’accès, alors qu’un
+dossier se crée par script, porte sa propre politique, et se supprime proprement
+quand un client s’en va.
+
+```text
+prod
+├── /ci                      cible principale
+├── /runtime
+├── /common                  valeurs partagées par les clients
+└── /clients
+    ├── /organisme-un
+    │   ├── /ci
+    │   └── /runtime         importe /common
+    └── /organisme-deux
+        ├── /ci
+        └── /runtime
+```
+
+Une instance de démonstration suit la même règle, dans l’environnement de
+développement : `dev` avec le préfixe `/demo` donne `/demo/ci` et
+`/demo/runtime`.
+
+`/common` porte ce qui ne varie pas : port d’écoute, modèle du fournisseur d’IA,
+serveur SMTP, réglages par défaut. Le dossier du client ne contient que ce qui
+lui est propre : son domaine, ses mots de passe, ses clés. La CLI et l’action
+GitHub résolvent les imports par défaut.
+
+Ajouter un client se réduit alors à quatre gestes : créer
+`/clients/<slug>/{ci,runtime}`, renseigner les valeurs propres, créer l’identité
+`<application>-prod-<slug>`, lancer le job avec le préfixe de chemin
+correspondant.
+
 ### Matrice d’accès
 
-| Identité                 | Environnement       | Chemin     | Droit                              |
-| ------------------------ | ------------------- | ---------- | ---------------------------------- |
-| Développeur du projet    | `dev`               | `/runtime` | lecture et écriture selon son rôle |
-| `<application>-dev-vps`  | `dev`               | `/runtime` | lecture                            |
-| `<application>-prod-vps` | `prod`              | `/runtime` | lecture                            |
-| `<application>-github`   | environnement ciblé | `/ci`      | lecture                            |
-| `<application>-jenkins`  | environnement ciblé | `/ci`      | lecture                            |
+| Identité                        | Environnement | Chemins             | Droit                              |
+| ------------------------------- | ------------- | ------------------- | ---------------------------------- |
+| Développeur du projet           | `dev`         | `/runtime`          | lecture et écriture selon son rôle |
+| `<application>-dev-vps`         | `dev`         | `/runtime`          | lecture                            |
+| `<application>-github`          | `dev`         | `/ci` et `/runtime` | lecture                            |
+| `<application>-jenkins-demo`    | `dev`         | `/demo`             | lecture                            |
+| `<application>-prod-<slug>`     | `prod`        | `/clients/<slug>`   | lecture                            |
 
 Créez une Machine Identity par application, environnement et consommateur. Une
-identité du VPS de développement ne doit pas lire les secrets de production.
+identité de développement ne doit pas lire les secrets de production, et
+l’identité d’un client ne doit pas lire ceux d’un autre.
+
+Un développeur reçoit `/runtime` pour lancer la stack sur son poste, jamais
+`/ci` : il n’a aucune raison de détenir la clé SSH de déploiement ni le jeton du
+registre. C’est cette distinction qui justifie les deux chemins.
 
 ## Déclarer le contrat dans Git
 
-Ajoutez `.env.example` au dépôt. Le fichier liste les paramètres requis sans
-contenir de valeur réelle :
+Ajoutez un fichier `env.example` au dépôt. Il liste les paramètres requis sans
+contenir de valeur réelle, et indique pour chacun d’où il vient :
 
-```dotenv title=".env.example"
-APP_ENV=
-DATABASE_HOST=
-DATABASE_NAME=
-DATABASE_USER=
-DATABASE_PASSWORD=
+```dotenv title="deployment/env.example"
+# [pipeline] calculée par le job, jamais dans Infisical
+APP_IMAGE_TAG=
+
+# [/ci] secrets de transport
+REGISTRY_TOKEN=
+DEPLOY_SSH_PRIVATE_KEY=
+
+# [/runtime] configuration d’exécution
+DATABASE_URL=
 JWT_SIGNING_KEY=
 SMTP_PASSWORD=
 ```
 
-Ajoutez une variable dans `.env.example` et dans chaque environnement Infisical
+Ajoutez une variable dans `env.example` et dans chaque environnement Infisical
 concerné dans la même livraison. La revue de code contrôle le nom, le service
 consommateur et le mode d’injection. La valeur ne figure ni dans la pull request
 ni dans un ticket.
 
-Le `.gitignore` doit couvrir les fichiers créés par les outils locaux :
+Le `.gitignore` doit couvrir tout ce que les outils locaux déposent, avec des
+exceptions explicites pour les fichiers réellement suivis :
 
 ```text title=".gitignore"
 .env
 .env.*
-!.env.example
+.env-*
+**/.env
+**/.env.*
+*.env
+env.*
 *.credentials
+.infisical-token
+
+!**/env.example
 ```
+
+Sans les négations, un `git add -A` désindexerait les fichiers d’exemple.
 
 Le fichier `.infisical.json` créé par `infisical init` contient l’identifiant du
 projet et le domaine Infisical. Il ne contient aucun secret et peut rejoindre le
@@ -135,72 +233,78 @@ infisical init
 infisical run --env=dev --path=/runtime -- npm run dev
 ```
 
-Remplacez `npm run dev` par la commande du projet. `infisical run` transmet les
-valeurs au processus enfant sans créer de fichier `.env`.
+`infisical run` transmet les valeurs au processus enfant sans créer de fichier
+`.env`. La commande accepte plusieurs `--path`, mais **pas** de `--recursive` :
+listez les chemins voulus explicitement.
+
+```sh
+infisical run --env=dev --path=/ci --path=/runtime -- ./deployment/deploy.sh
+```
 
 Une application qui exige un fichier `.env` doit évoluer vers la lecture de
-variables ou de fichiers `*_FILE`. Pendant sa migration, générez le fichier pour
-la durée du test, appliquez le mode `600`, gardez-le hors de Git et supprimez-le
-à la fin de la session.
+variables. Pendant sa migration, générez le fichier pour la durée du test,
+appliquez le mode `600`, gardez-le hors de Git et supprimez-le à la fin de la
+session.
 
-:::Point d'attention
+:::caution[Point d’attention]
 N’exécutez pas `printenv`, `env`, `set -x` ou `docker compose config` sans
 `--quiet` dans une session qui contient des secrets. Ces commandes peuvent les
-copier dans les journaux du terminal ou du pipeline.
+copier dans les journaux du terminal ou du pipeline. Pour inspecter un Compose
+sans fuite, utilisez `docker compose config --no-interpolate`.
 :::
 
-## Injecter les secrets avec Docker Compose
+## Injecter les secrets dans Docker Compose
 
-Le VPS lance la CLI Infisical sur l’hôte. La CLI injecte les valeurs dans le
-processus Docker Compose, qui les monte dans les conteneurs sous
-`/run/secrets/<nom>`. Le jeton Infisical n’entre pas dans les conteneurs.
+Docker Compose interpole `${VARIABLE}` depuis l’environnement du processus. Un
+`infisical run` qui enveloppe la commande suffit donc : aucun `--env-file`,
+aucun fichier écrit sur le disque.
 
-Privilégiez la convention `*_FILE` dans l’application :
+```sh
+infisical run --env=dev --path=/runtime -- \
+  docker compose -f compose.yml up -d --wait
+```
 
-```yaml title="compose.dev.yml"
+Déclarez les variables porteuses d’identifiants avec `:?`. Sans cela, Compose
+n’échoue pas : il émet un avertissement et démarre un PostgreSQL sans mot de
+passe.
+
+```yaml title="compose.yml"
 services:
   db:
-    image: postgres:17
+    image: postgres:18-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+```
+
+:::danger[Le `.env` fantôme]
+Compose charge automatiquement un `.env` présent dans le répertoire du projet.
+L’environnement du processus reste prioritaire, mais un fichier oublié
+**fournirait** une variable absente d’Infisical et masquerait une erreur de
+configuration. Faites échouer le script de déploiement s’il en trouve un :
+
+```sh
+[ ! -f .env ] || { echo "Un fichier .env traîne dans le dépôt." >&2; exit 1; }
+```
+:::
+
+Une variable de conteneur apparaît dans `docker inspect` et peut atteindre les
+journaux. Lorsque l’image prend en charge la convention `*_FILE`, préférez un
+secret Compose monté dans `/run/secrets` :
+
+```yaml title="compose.yml"
+services:
+  db:
+    environment:
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
     secrets:
       - postgres_password
 
-  web:
-    image: "${APP_IMAGE:?Set APP_IMAGE}:${APP_IMAGE_TAG:?Set APP_IMAGE_TAG}"
-    environment:
-      DATABASE_HOST: db
-      DATABASE_NAME: ${POSTGRES_DB:?Set POSTGRES_DB}
-      DATABASE_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
-      DATABASE_PASSWORD_FILE: /run/secrets/postgres_password
-      JWT_SIGNING_KEY_FILE: /run/secrets/jwt_signing_key
-    secrets:
-      - postgres_password
-      - jwt_signing_key
-
 secrets:
   postgres_password:
     environment: POSTGRES_PASSWORD
-  jwt_signing_key:
-    environment: JWT_SIGNING_KEY
 ```
-
-Compose ne donne un secret qu’aux services qui le déclarent. Le code lit le
-chemin fourni par `DATABASE_PASSWORD_FILE` ou `JWT_SIGNING_KEY_FILE`.
-
-Certaines applications acceptent encore le secret sous forme de variable. Le
-bloc suivant sert de transition :
-
-```yaml
-environment:
-  LEGACY_API_KEY: ${LEGACY_API_KEY:?Set LEGACY_API_KEY}
-```
-
-Une variable de conteneur apparaît dans `docker inspect` et peut atteindre les
-journaux. Ajoutez la prise en charge de `LEGACY_API_KEY_FILE`, puis remplacez ce
-bloc par un secret Compose.
 
 ### Secrets utilisés pendant le build
 
@@ -213,29 +317,23 @@ RUN --mount=type=secret,id=npm_token \
     NPM_TOKEN="$(cat /run/secrets/npm_token)" npm ci
 ```
 
-```yaml title="compose.dev.yml"
-services:
-  web:
-    build:
-      context: .
-      secrets:
-        - npm_token
-
-secrets:
-  npm_token:
-    environment: NPM_TOKEN
-```
-
 L’identité CI lit `NPM_TOKEN` depuis `/ci`. BuildKit rend la valeur disponible
 pendant l’instruction `RUN` concernée sans l’ajouter à l’image.
 
-## Configurer le VPS
+:::caution[Point d’attention]
+Une variable compilée dans un bundle front — tout préfixe `VITE_`, `NEXT_PUBLIC_`
+ou équivalent — est **publique par construction** : elle est lisible dans le
+JavaScript livré à chaque visiteur. Elle reste dans Git, avec le code. Un secret
+ne doit jamais porter ce préfixe.
+:::
+
+## Mécanique A — le serveur lit ses secrets
 
 Un administrateur Infisical crée l’identité `<application>-dev-vps`, lui accorde
 la lecture de l’environnement `dev` sous `/runtime`, puis active Universal Auth.
-Le Client ID et le Client Secret permettent au VPS d’obtenir un jeton court.
+Le Client ID et le Client Secret permettent au serveur d’obtenir un jeton court.
 
-Le VPS conserve ces deux valeurs dans un fichier distinct de la stack :
+Le serveur conserve ces deux valeurs dans un fichier distinct de la stack :
 
 ```dotenv title="/home/martin/.config/infisical/facturation-dev.credentials"
 INFISICAL_UNIVERSAL_AUTH_CLIENT_ID='<client-id>'
@@ -249,76 +347,116 @@ l’application et ne le transmettez pas au pipeline.
 La configuration non sensible reste avec le déploiement :
 
 ```dotenv title=".deploy.env"
-DEV_APP_HOST=facturation.dev.step.eco
+APP_HOST=facturation.dev.step.eco
 APP_IMAGE=studiofabrique/facturation
 APP_IMAGE_TAG=1.4.2
-POSTGRES_DB=facturation
-POSTGRES_USER=facturation
 
 INFISICAL_DOMAIN=https://app.infisical.com
 INFISICAL_PROJECT_ID='<project-id>'
 INFISICAL_ENVIRONMENT=dev
-INFISICAL_SECRET_PATH=/runtime
 INFISICAL_CREDENTIALS_FILE=/home/martin/.config/infisical/facturation-dev.credentials
-```
-
-Adaptez `INFISICAL_DOMAIN` à l’instance EU ou auto-hébergée. Le script suivant
-peut rejoindre le dépôt, car il ne contient aucune valeur sensible :
-
-```sh title="deployment/with-infisical"
-#!/bin/sh
-set -eu
-set +x
-
-deploy_env_file="${DEPLOY_ENV_FILE:-.deploy.env}"
-
-set -a
-. "$deploy_env_file"
-. "$INFISICAL_CREDENTIALS_FILE"
-set +a
-
-INFISICAL_TOKEN="$(
-  infisical login \
-    --method=universal-auth \
-    --plain \
-    --silent
-)"
-export INFISICAL_TOKEN
-
-exec infisical run \
-  --projectId="$INFISICAL_PROJECT_ID" \
-  --env="$INFISICAL_ENVIRONMENT" \
-  --path="$INFISICAL_SECRET_PATH" \
-  -- "$@"
 ```
 
 Le serveur déploie ensuite la stack sans créer de fichier de secrets :
 
 ```sh
-deployment/with-infisical docker compose \
-  --env-file .deploy.env -f compose.dev.yml config --quiet
+deployment/with-infisical.sh docker compose \
+  --env-file .deploy.env -f compose.yml config --quiet
 
-deployment/with-infisical docker compose \
-  --env-file .deploy.env -f compose.dev.yml pull
-
-deployment/with-infisical docker compose \
-  --env-file .deploy.env -f compose.dev.yml up -d --wait --remove-orphans
+deployment/with-infisical.sh docker compose \
+  --env-file .deploy.env -f compose.yml up -d --wait --remove-orphans
 ```
 
-Le wrapper demande un nouveau jeton avant chaque commande. Infisical limite ce
-jeton à la durée et aux droits configurés sur la Machine Identity.
+## Mécanique B — le runner lit les secrets
+
+Le runner récupère `/ci` et `/runtime`, puis pilote le démon Docker distant. Le
+serveur n’héberge que ses données persistantes.
+
+### Protéger les métadonnées du pipeline
+
+Les valeurs injectées par Infisical entrent dans le même environnement que
+celles calculées par le job. Un ancien fichier d’environnement importé en bloc
+dans `/runtime` écraserait donc le tag de l’image.
+
+Préfixez les métadonnées du pipeline, et redonnez-leur la priorité au début du
+script de déploiement :
+
+```sh title="deployment/deploy.sh"
+# Les pipelines placent leurs métadonnées sous le préfixe `PIPELINE_` avant
+# l’injection Infisical. Elles reprennent ici la priorité sur les variables de
+# même nom.
+for name in DEPLOY_MODE DEPLOY_PATH APP_IMAGE APP_IMAGE_TAG APP_HOST; do
+    eval "is_set=\${PIPELINE_$name+x}"
+    if [ "$is_set" = x ]; then
+        eval "value=\${PIPELINE_$name}"
+        export "$name=$value"
+    fi
+done
+```
+
+### Le wrapper Universal Auth
+
+Ce script sert aux agents Jenkins et aux postes de développement. Il ne contient
+aucune valeur sensible et peut rejoindre le dépôt :
+
+```sh title="deployment/with-infisical.sh"
+#!/bin/sh
+set -eu
+
+# Un `set -x` hérité du job afficherait le Client Secret et le jeton court.
+set +x
+
+# La CLI reconnaît les deux variables Universal Auth. Elles ne passent donc pas
+# dans les arguments du processus, visibles avec `ps`.
+INFISICAL_TOKEN="$(
+    infisical login --method=universal-auth \
+        --domain="$INFISICAL_DOMAIN" --plain --silent
+)"
+export INFISICAL_TOKEN
+unset INFISICAL_UNIVERSAL_AUTH_CLIENT_ID INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET
+
+exec infisical run \
+    --domain="$INFISICAL_DOMAIN" \
+    --projectId="$INFISICAL_PROJECT_ID" \
+    --env="$INFISICAL_ENVIRONMENT" \
+    --path="$INFISICAL_PATH_PREFIX/ci" \
+    --path="$INFISICAL_PATH_PREFIX/runtime" \
+    -- "$@"
+```
+
+`infisical login --method=universal-auth` lit
+`INFISICAL_UNIVERSAL_AUTH_CLIENT_ID` et `INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET`
+depuis l’environnement. Aucun identifiant ne figure donc sur la ligne de
+commande.
+
+`INFISICAL_PATH_PREFIX` vaut la chaîne vide pour la cible principale d’un
+environnement, `/demo` pour la démonstration, `/clients/<slug>` pour une
+instance cliente. Il commence par `/` et ne se termine jamais par `/`.
+
+:::caution[Point d’attention]
+Jenkins masque le Client Secret fourni par `withCredentials`, **pas** le jeton
+court qui en dérive. D’où `--plain --silent`, et l’interdiction de `set -x` dans
+les scripts de déploiement.
+:::
 
 ## Utiliser Infisical dans GitHub Actions
 
-GitHub Actions s’authentifie avec OIDC. L’identité Infisical borne le sujet au
-dépôt et à la branche ou à l’environnement GitHub attendu. Une production peut
-par exemple exiger le sujet suivant :
+GitHub Actions s’authentifie avec OIDC. Aucun secret d’amorçage n’est nécessaire :
+GitHub signe lui-même le jeton d’identité, Infisical le valide auprès de
+`https://token.actions.githubusercontent.com`. Tous les secrets du dépôt peuvent
+donc disparaître, y compris la clé SSH de déploiement et le jeton du registre.
 
-```text
-repo:StudioFabrique/<depot>:environment:production
-```
+Configurez l’identité en OIDC Auth :
 
-Le workflow accorde `id-token: write`, puis récupère le chemin `/ci` :
+| Champ                | Valeur                                            |
+| -------------------- | ------------------------------------------------- |
+| Discovery URL        | `https://token.actions.githubusercontent.com`     |
+| Issuer               | `https://token.actions.githubusercontent.com`     |
+| Audience (`aud`)     | `https://github.com/StudioFabrique`               |
+| Subject (`sub`)      | `repo:StudioFabrique/<depot>:environment:<env>`   |
+| Access Token TTL     | 600 s                                             |
+
+Le workflow accorde `id-token: write`, puis récupère les deux chemins :
 
 ```yaml title=".github/workflows/deploy.yml"
 permissions:
@@ -330,71 +468,70 @@ jobs:
     environment: development
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Charger les secrets de déploiement
+      - name: Charger les secrets de transport
         uses: Infisical/secrets-action@<sha-validé>
         with:
           method: oidc
-          identity-id: "<identity-id>"
-          project-slug: "<project-slug>"
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
           env-slug: dev
           secret-path: /ci
-          domain: "https://app.infisical.com"
+          domain: https://app.infisical.com
 
-      - name: Construire et déployer
-        run: ./deployment/deploy-ci.sh
+      - name: Charger la configuration d’exécution
+        uses: Infisical/secrets-action@<sha-validé>
+        with:
+          method: oidc
+          identity-id: ${{ vars.INFISICAL_IDENTITY_ID }}
+          project-slug: ${{ vars.INFISICAL_PROJECT_SLUG }}
+          env-slug: dev
+          secret-path: /runtime
+          domain: https://app.infisical.com
+
+      - name: Déployer
+        run: ./deployment/deploy.sh
 ```
 
-Épinglez les actions tierces à un SHA de commit validé dans le workflow réel.
-L’Identity ID et le Project Slug peuvent rester dans Git. Ne donnez pas à cette
-identité l’accès à `/runtime` : le script distant `deployment/with-infisical`
-charge les secrets applicatifs sur le VPS.
+Épinglez l’action à un SHA de commit validé. L’Identity ID et le Project Slug ne
+sont pas des secrets et peuvent rester dans des variables de dépôt.
+
+L’action accepte `project-slug`, jamais `project-id`. `export-type` vaut `env`
+par défaut : les valeurs deviennent des variables d’environnement pour les
+étapes suivantes.
 
 ## Utiliser Infisical dans Jenkins
 
-Le plugin Jenkins Infisical prend en charge Universal Auth. Créez une identité
-`<application>-jenkins` qui lit `/ci`, puis enregistrez son Client ID et son
-Client Secret dans un credential Jenkins de type **Infisical Universal Auth
-Credential**.
+Le plugin Jenkins exige d’énumérer chaque clé une par une, sans joker ni import
+d’un chemin entier. Sur une application qui compte une trentaine de variables,
+cela reconstruit le problème que la migration cherche à supprimer : une liste à
+maintenir en trois endroits.
 
-Le générateur de snippets Jenkins produit le bloc `withInfisical` adapté à la
-version du plugin. Demandez les clés par leur nom au lieu d’importer le projet
-entier :
+Préférez la CLI sur l’agent. Le pipeline ne porte alors qu’un seul credential :
 
 ```groovy title="Jenkinsfile"
-withInfisical(
-  configuration: [
-    infisicalCredentialId: 'INFISICAL_FACTURATION_DEV',
-    infisicalEnvironmentSlug: 'dev',
-    infisicalProjectSlug: '<project-slug>',
-    infisicalUrl: 'https://app.infisical.com'
-  ],
-  infisicalSecrets: [
-    infisicalSecret(
-      includeImports: false,
-      path: '/ci',
-      secretValues: [
-        [infisicalKey: 'REGISTRY_USER'],
-        [infisicalKey: 'REGISTRY_TOKEN'],
-        [infisicalKey: 'VPS_SSH_PRIVATE_KEY']
-      ]
+withCredentials([
+    usernamePassword(
+        credentialsId: 'INFISICAL_FACTURATION',
+        usernameVariable: 'INFISICAL_UNIVERSAL_AUTH_CLIENT_ID',
+        passwordVariable: 'INFISICAL_UNIVERSAL_AUTH_CLIENT_SECRET'
     )
-  ]
-) {
-  sh './deployment/deploy-ci.sh'
+]) {
+    sh './deployment/with-infisical.sh ./deployment/deploy.sh'
 }
 ```
 
-Le credential Infisical remplace les fichiers `APP_ENV` et les secrets
-applicatifs copiés dans Jenkins. Le job déclenche le wrapper du VPS pour le
-démarrage des conteneurs.
+Les valeurs non sensibles — Project ID, slug d’environnement, préfixe de chemin,
+nom de la stack — deviennent des paramètres du job. Un job paramétré remplace
+ainsi un job par client.
+
+Ce choix suppose la CLI `infisical` installée sur les agents Jenkins. C’est le
+seul coût de cette approche, à traiter avant le premier déploiement.
 
 ## Ajouter ou modifier un secret
 
-Une pull request qui ajoute une dépendance à un secret suit cette séquence :
-
-1. le développeur ajoute le nom et un commentaire dans `.env.example` ;
+1. le développeur ajoute le nom et un commentaire dans `env.example` ;
 2. le propriétaire du secret crée la valeur dans les environnements concernés ;
 3. un administrateur contrôle les droits des identités consommatrices ;
 4. le pipeline vérifie `docker compose config --quiet`, déploie et attend les
@@ -403,20 +540,31 @@ Une pull request qui ajoute une dépendance à un secret suit cette séquence :
    une rotation.
 
 Préférez deux credentials actifs pendant une rotation. Créez la nouvelle clé,
-déployez-la, contrôlez le service, puis révoquez l’ancienne. Cette méthode évite
-une coupure entre le fournisseur du secret et l’application.
+déployez-la, contrôlez le service, puis révoquez l’ancienne.
 
-:::Point d'attention[Cas des bases de données]
+Générez les mots de passe sans caractère réservé, en base64url :
+
+```sh
+openssl rand -base64 32 | tr '+/' '-_' | tr -d '='
+```
+
+La valeur brute et la valeur utilisable dans une URL sont alors identiques, ce
+qui supprime la principale source d’erreur des chaînes de connexion.
+
+:::caution[Cas des bases de données]
 Modifier `POSTGRES_PASSWORD` dans Infisical ne change pas le mot de passe d’une
 base PostgreSQL existante. L’image officielle utilise cette variable lors de
 l’initialisation du volume. Modifiez le rôle dans PostgreSQL, mettez à jour
-Infisical, redéployez les consommateurs et contrôlez leurs connexions avant de
+Infisical — le mot de passe brut **et** l’URL qui le contient, dans la même
+écriture — redéployez les consommateurs et contrôlez leurs connexions avant de
 révoquer l’ancien accès.
 :::
 
 Un conteneur en cours d’exécution garde les valeurs reçues à son démarrage. Une
 modification dans Infisical demande donc un redéploiement de la stack et la
-validation de ses healthchecks.
+validation de ses healthchecks. C’est aussi pourquoi une commande `docker
+compose exec` voit l’ancien environnement, alors qu’un `docker compose run`
+recrée un conteneur et reçoit le nouveau.
 
 ## Migrer une application existante
 
@@ -424,16 +572,19 @@ validation de ses healthchecks.
    et les messages qui contiennent une valeur sensible.
 2. Créez le projet Infisical, ses environnements, les chemins `/runtime` et
    `/ci`, puis importez les valeurs connues.
-3. Comparez les clés importées avec `.env.example` et le Compose. Recréez les
+3. Comparez les clés importées avec `env.example` et le Compose. Recréez les
    valeurs inconnues au lieu de les deviner.
-4. Ajoutez les Machine Identities du VPS et des pipelines avec les droits de la
-   matrice.
-5. Adaptez le Compose aux secrets montés et installez le wrapper
-   `deployment/with-infisical`.
-6. Déployez, contrôlez les healthchecks et testez les fonctions qui utilisent
-   chaque fournisseur externe.
-7. Révoquez les valeurs exposées sur Discord ou dans Git, puis retirez les
-   anciens fichiers et credentials CI.
+4. Ajoutez les Machine Identities du serveur et des pipelines avec les droits de
+   la matrice.
+5. **Factorisez d’abord le déploiement, sans Infisical.** Extrayez la séquence
+   dans un script versionné et faites-la valider par les pipelines existants,
+   qui gardent leur ancienne source de secrets. Si un déploiement casse à cette
+   étape, la cause est le script.
+6. Basculez ensuite un environnement à la fois, en commençant par celui qu’on
+   peut casser sans conséquence. Conservez l’ancien secret en place, inutilisé,
+   pendant une semaine : le retour arrière est alors un `git revert`.
+7. Faites tourner les valeurs exposées, puis retirez les anciens fichiers et
+   credentials CI.
 
 Ne supprimez la dernière copie d’un ancien secret qu’après le contrôle du
 nouveau déploiement. Une valeur présente dans l’historique Git exige une
@@ -449,20 +600,27 @@ rotation même si un commit ultérieur la retire.
 
 Effacer un message ou un commit ne rétablit pas la confidentialité de la valeur.
 
+Mesurez les effets fonctionnels avant d’agir : une clé de signature de session
+déconnecte tous les utilisateurs, une clé d’activation invalide les invitations
+déjà distribuées.
+
 ## Checklist de conformité
 
-- [ ] Le dépôt contient un `.env.example` sans valeur sensible.
+- [ ] Le dépôt contient un `env.example` sans valeur sensible, qui indique le
+      chemin Infisical de chaque bloc.
 - [ ] Infisical contient les mêmes clés dans chaque environnement requis.
-- [ ] Les secrets applicatifs se trouvent sous `/runtime` et les secrets CI sous
-      `/ci`.
-- [ ] Chaque environnement et consommateur possède sa Machine Identity.
-- [ ] Le VPS accède à `/runtime` en lecture avec Universal Auth.
-- [ ] GitHub Actions utilise OIDC et Jenkins le credential Universal Auth du
-      plugin Infisical.
-- [ ] Le pipeline ne récupère pas les secrets applicatifs de `/runtime`.
-- [ ] Docker Compose monte les secrets dans `/run/secrets` quand l’application
-      accepte `*_FILE`.
-- [ ] BuildKit monte les secrets utilisés pendant un build.
+- [ ] Les secrets applicatifs se trouvent sous `/runtime` et les secrets de
+      transport sous `/ci`.
+- [ ] Chaque environnement, client et consommateur possède sa Machine Identity.
+- [ ] Les développeurs reçoivent `/runtime` sur `dev`, jamais `/ci`.
+- [ ] GitHub Actions utilise OIDC, sans aucun secret de dépôt.
+- [ ] Jenkins ne porte qu’un credential Universal Auth par instance.
+- [ ] Aucune métadonnée de pipeline ne figure dans Infisical, et le script de
+      déploiement leur redonne la priorité.
+- [ ] Le script de déploiement refuse de démarrer si un `.env` traîne dans le
+      dépôt.
+- [ ] Les variables porteuses d’identifiants sont déclarées `${VAR:?}` dans le
+      Compose.
 - [ ] Les scripts n’affichent ni l’environnement ni la sortie complète de
       `docker compose config`.
 - [ ] Une rotation possède un propriétaire, une date et une procédure de retour

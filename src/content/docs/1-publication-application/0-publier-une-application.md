@@ -67,7 +67,7 @@ Conservez le préfixe `http://` dans le label `caddy`, même si les utilisateurs
 
 Le `caddy.import: "dev_access"` limite l’accès aux adresses IP autorisées dans le Caddyfile central. Toute demande d’ajout ou de retrait d’une adresse IP concerne la configuration Caddy partagée, située dans `/home/martin/caddy-step-http`.
 
-:::Point d'attention
+:::caution[Point d’attention]
 Ne retirez pas `dev_access`. Une application de développement sans cet import deviendrait accessible hors du réseau autorisé.
 :::
 

@@ -1,136 +1,133 @@
 ---
 title: Déployer le LXP avec Jenkins
-description: Déploiement direct ou raccordé au Caddy partagé depuis les pipelines Jenkins du dépôt LXP
+description: Déploiement direct ou raccordé au Caddy partagé, avec les secrets fournis par Infisical
 ---
 
-Le dépôt LXP conserve deux pipelines Jenkins. Les deux récupèrent les images
-Docker, préparent les bases, appliquent les migrations Prisma et installent les
-triggers ANDRIA.
-
-:::caution[Pipeline hérité]
-Le credential `APP_ENV` décrit sur cette page correspond au pipeline LXP actuel.
-Ne le reproduisez pas dans un nouveau job. La cible de migration utilise
-[Infisical comme source de vérité](/1-publication-application/1-gerer-les-secrets/),
-le chemin `/ci` dans Jenkins et le chemin `/runtime` sur le VPS.
-:::
+Le dépôt LXP conserve deux pipelines de déploiement et un pipeline de
+construction. Tous récupèrent leurs secrets dans Infisical avec une Machine
+Identity, et aucun ne porte plus de fichier d’environnement.
 
 | Mode   | Jenkinsfile                     | Accès public                                                                              |
 | ------ | ------------------------------- | ----------------------------------------------------------------------------------------- |
-| Direct | `deployment/direct/Jenkinsfile` | Le conteneur `app` publie le port 80 du VPS                                               |
+| Direct | `deployment/direct/Jenkinsfile` | Le conteneur `app` publie le port 80 du serveur                                           |
 | Caddy  | `deployment/caddy/Jenkinsfile`  | Le conteneur `app` rejoint le réseau externe `caddy` et porte les labels du proxy partagé |
 
 Le mode Caddy ne déploie aucun conteneur Caddy. Le proxy reste dans
-`/home/martin/caddy-step-http` et lit les labels Docker. Le dépôt LXP n'a plus de
-Caddyfile ni de Dockerfile Caddy.
+`/home/martin/caddy-step-http` et lit les labels Docker.
 
 Les bases utilisent le réseau interne de la stack. Le service IA rejoint ce
 réseau et un réseau de sortie dédié aux API Mistral et Hugging Face. Aucun de
-ces services ne publie de port sur l'hôte.
+ces services ne publie de port sur l’hôte.
 
-## Préparer Jenkins et le serveur cible
+## Ce que le serveur héberge
 
-L'agent Jenkins doit fournir Git, Docker avec le plugin Compose, SSH et rsync.
-Son compte système doit pouvoir lancer Docker et ouvrir une connexion SSH vers
-le serveur cible.
+Les pipelines pilotent le démon Docker distant par `DOCKER_HOST=ssh://`. Le
+serveur ne reçoit ni fichier Compose, ni script SQL, ni fichier d’environnement :
+il ne conserve que `data/`, `uploads/` et `logs/` sous le répertoire cible.
 
-Le compte SSH du serveur doit :
+C’est la [mécanique B](/1-publication-application/1-gerer-les-secrets/#choisir-le-point-dinjection)
+de la norme : l’agent Jenkins lit `/ci` et `/runtime`, puis crée les conteneurs
+à distance.
 
-- se connecter par clé et exécuter Docker sans `sudo` ;
-- écrire dans `/home/<SSH_USER>/<SSH_TARGET>`.
+## Préparer l’agent Jenkins
+
+L’agent doit fournir Git, Docker avec le plugin Compose, SSH, rsync et **la CLI
+`infisical`**. Son compte système doit pouvoir lancer Docker et ouvrir une
+connexion SSH vers le serveur cible.
+
+```sh
+infisical --version
+```
+
+Sans cette CLI, `deployment/with-infisical.sh` s’arrête immédiatement avec un
+message explicite.
+
+Le compte SSH du serveur doit se connecter par clé, exécuter Docker sans `sudo`
+et écrire dans le répertoire cible.
 
 Le mode direct réserve le port TCP 80 à `app`. Le mode Caddy demande un proxy
-partagé en cours d'exécution et le réseau Docker externe `caddy` :
+partagé en cours d’exécution et le réseau Docker externe `caddy` :
 
 ```sh
 docker network inspect caddy
 docker ps --filter name=caddy
 ```
 
-## Créer les credentials Jenkins actuels
+## Créer l’identité et le credential
 
-Les deux pipelines utilisent les IDs suivants :
+Créez une Machine Identity Infisical par instance déployée, avec Universal Auth
+et la lecture de `/ci` et `/runtime` sur son environnement.
 
-| ID                | Type                          | Contenu                             |
-| ----------------- | ----------------------------- | ----------------------------------- |
-| `APP_ENV`         | Secret file                   | fichier d'environnement applicatif  |
-| `APP_SSH_HOST`    | Secret text                   | adresse IP ou nom SSH du serveur    |
-| `DOCKER_REGISTRY` | Username with password        | compte Docker Hub et jeton          |
-| `SSH_USER`        | Secret text                   | compte Linux du serveur             |
-| `SSH_PORT`        | Secret text                   | port SSH                            |
-| `SSH_TARGET`      | Secret text                   | répertoire sous `/home/<SSH_USER>`  |
-| `SSH_CREDENTIALS` | SSH Username with private key | clé privée du compte de déploiement |
+Enregistrez ensuite son Client ID et son Client Secret dans un unique credential
+Jenkins de type **Username with password** :
+
+| ID               | Type                   | Contenu                       |
+| ---------------- | ---------------------- | ----------------------------- |
+| `INFISICAL_LXP`  | Username with password | Client ID et Client Secret    |
+
+Ce credential remplace `APP_ENV`, `APP_DOMAIN`, `APP_SSH_HOST`, `SSH_USER`,
+`SSH_PORT`, `SSH_TARGET`, `SSH_CREDENTIALS` et `DOCKER_REGISTRY`. Supprimez-les
+une fois le premier déploiement validé.
 
 Le job configuré avec **Pipeline script from SCM** utilise aussi le credential
 Git qui donne accès au dépôt LXP.
 
-Le mode Caddy ajoute ce credential :
+## Renseigner Infisical
 
-| ID           | Type        | Contenu                                                |
-| ------------ | ----------- | ------------------------------------------------------ |
-| `APP_DOMAIN` | Secret text | domaine sans protocole, par exemple `lxp.dev.step.eco` |
+Le contrat complet se trouve dans `deployment/env.example`, qui indique pour
+chaque bloc s’il relève du pipeline, de `/ci` ou de `/runtime`.
 
-Le Jenkinsfile injecte `APP_DOMAIN` dans la variable Compose `DEV_APP_HOST`.
-Supprimez les anciens credentials `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
-`OVH_APPLICATION_SECRET` et `OVH_CONSUMER_KEY` si aucun autre job ne les
-utilise. Le proxy partagé gère la configuration Caddy.
-
-## Préparer `APP_ENV` pendant la migration
-
-Créez un fichier hors du dépôt, ajoutez-le à Jenkins sous l'ID `APP_ENV`, puis
-remplacez chaque valeur entre chevrons :
+`/ci` porte les identifiants du registre et l’accès SSH :
 
 ```dotenv
-PORT=3000
-ENVIRONMENT=production
-FRONT_URL=https://lxp.dev.step.eco/
-REGISTER_SECRET=<secret-activation>
-SECRET=<secret-session>
-
-POSTGRES_USER=lxp
-POSTGRES_PASSWORD=<mot-de-passe-postgres>
-POSTGRES_DB=lxp
-DATABASE_URL=postgresql://lxp:<mot-de-passe-url>@db-pg:5432/lxp
-
-ANDRIA_POSTGRES_USER=andria
-ANDRIA_POSTGRES_PASSWORD=<mot-de-passe-postgres-ia>
-ANDRIA_POSTGRES_DB=lxp_ai
-ANDRIA_AI_DB_URL=postgresql://andria:<mot-de-passe-url-ia>@db-ai:5432/lxp_ai
-LXP_DB_URL=postgresql://lxp:<mot-de-passe-url>@db-pg:5432/lxp
-
-MONGO_ADMIN_USERNAME=lxp
-MONGO_ADMIN_PASSWORD=<mot-de-passe-mongo>
-MONGO_DATABASE=lxp
-MONGO_LOCAL_URL=mongodb://lxp:<mot-de-passe-url-mongo>@db-mongo:27017/lxp?authSource=admin
-
-DOCKER_IA_API_BASE_URL=http://ai:8000
-DOCKER_IA_AUTH_SECRET=<secret-commun-lxp-ia>
-SECRET_KEY=<secret-commun-lxp-ia>
-MISTRAL_STUDENT_API_KEY=<cle-mistral-student>
-MISTRAL_CONTENT_API_KEY=<cle-mistral-content>
-MISTRAL_MODEL=mistral-small-latest
-LXP_PUBLIC_BASE=https://lxp.dev.step.eco
-
-EMAIL=contact@example.com
-PASSWORD=<mot-de-passe-smtp>
-SMTP=smtp.example.com
-SMTP_EMAIL=contact@example.com
-SMTP_PORT=587
-FROM="ANDRIA <contact@example.com>"
-
-UNSPLASH_ACCESS_KEY=<cle-unsplash>
+REGISTRY_USER=
+REGISTRY_TOKEN=
+DEPLOY_SSH_HOST=
+DEPLOY_SSH_USER=
+DEPLOY_SSH_PORT=22
+DEPLOY_SSH_PRIVATE_KEY=
 ```
 
-Le mode direct utilise des URL en `http://` lorsqu'aucun proxy externe ne gère
-TLS. Encodez les caractères réservés des mots de passe dans les URL de connexion
-et gardez leur valeur brute dans les variables `*_PASSWORD`.
+`/runtime` porte la configuration de l’application : secrets de session,
+chaînes de connexion, réglages SMTP, clés du fournisseur d’IA, drapeaux du mode
+démonstration.
 
-## Construire les images
+:::danger[Ne versez pas l’ancien `APP_ENV` en bloc]
+`LXP_IMAGE`, `LXP_IMAGE_TAG`, `LXP_AI_IMAGE`, `LXP_AI_IMAGE_TAG`,
+`LXP_DEPLOYMENT_NAME`, `DEPLOY_PATH`, `APP_HOST` et `DEPLOY_MODE` sont calculés
+par le job. Le script leur redonne la priorité au démarrage, mais les laisser
+dans le coffre entretient une source de vérité fausse.
+:::
 
-Créez un premier job avec `build.Jenkinsfile` comme **Script Path**. Ce job
-construit et publie `studiostep/lxp:latest`.
+## Paramètres des jobs
 
-Le dépôt ANDRIA-IA publie `studiostep/lxp-ai:latest`. Attendez la fin de ce
-workflow avant un déploiement qui modifie le service IA.
+Les trois Jenkinsfile exposent leurs valeurs non sensibles en paramètres. Un job
+paramétré remplace ainsi un job par instance.
+
+| Paramètre                | Rôle                                                             |
+| ------------------------ | ---------------------------------------------------------------- |
+| `INFISICAL_PROJECT_ID`   | Project ID du projet LXP                                          |
+| `INFISICAL_ENVIRONMENT`  | slug Infisical : `dev`, `staging` ou `prod`                       |
+| `INFISICAL_PATH_PREFIX`  | vide, `/demo`, ou `/clients/<slug>` pour une instance cliente     |
+| `DEPLOY_PATH`            | répertoire persistant sur le serveur cible                        |
+| `LXP_DEPLOYMENT_NAME`    | nom stable de la stack, de ses conteneurs et de ses volumes       |
+| `APP_HOST`               | domaine sans protocole, mode Caddy uniquement                     |
+| `LXP_IMAGE_TAG`          | `latest`, ou un tag précis pour un retour arrière                 |
+| `LXP_AI_IMAGE_TAG`       | tag de l’image ANDRIA-IA                                          |
+
+:::caution[Point d’attention]
+`LXP_DEPLOYMENT_NAME` nomme les volumes. Le modifier sur une instance existante
+la ferait repartir de bases vides, les anciens volumes restant orphelins.
+:::
+
+## Construire l’image
+
+Créez un premier job avec `build.Jenkinsfile` comme **Script Path**. Il
+s’authentifie sur `/ci` seulement, construit le `Dockerfile` de la racine, puis
+publie l’image sous le SHA du commit et sous `latest`.
+
+Le dépôt ANDRIA-IA publie `studiostep/lxp-ai`. Attendez la fin de son workflow
+avant un déploiement qui modifie le service IA.
 
 ## Créer le job de déploiement
 
@@ -142,39 +139,83 @@ deployment/direct/Jenkinsfile
 deployment/caddy/Jenkinsfile
 ```
 
-Le pipeline exécute ces opérations :
+Le Jenkinsfile ne porte que la récupération des secrets et le calcul des
+métadonnées. La séquence elle-même vit dans `deployment/deploy.sh` :
 
 1. crée `data`, `uploads` et `logs` sous le répertoire cible ;
 2. synchronise le contenu initial de `api/uploads` ;
 3. récupère les images et démarre PostgreSQL, pgvector et MongoDB ;
 4. applique les migrations Prisma et les triggers ANDRIA ;
-5. provisionne la base IA, puis démarre `ai` et `app`.
+5. provisionne la base IA, puis démarre `ai` et `app` en attendant leurs
+   healthchecks.
 
-Le mode Caddy vérifie le réseau externe `caddy` avant de toucher à la stack. Le
-Compose attend les healthchecks de l'IA et de l'application. Lors du premier
-passage depuis l'ancien déploiement, il retire le conteneur Caddy devenu orphelin
-et conserve ses volumes.
+Le mode Caddy vérifie le réseau externe `caddy` avant de toucher à la stack.
+
+## Le mode démonstration
+
+Le plan Cloud gratuit d’Infisical n’inclut que trois environnements. La
+démonstration vit donc dans `dev`, sous le préfixe `/demo` : le wrapper lit
+`/demo/ci` et `/demo/runtime`.
+
+`DEMO_MODE` y est une simple clé. Sur `true`, `deploy.sh` écarte la couche IA,
+remet la base à zéro, restaure le jeu de démonstration et prépare les deux
+comptes empruntés par les visiteurs.
+
+L’instance de démonstration exige `DEMO_ADMIN_EMAIL` et `DEMO_STUDENT_EMAIL`, et
+n’exige aucun réglage de la couche IA. Le script adapte sa validation au mode.
 
 ## Contrôler le résultat
 
-Le pipeline affiche l'état des services. Contrôlez les journaux sur le serveur :
+Le pipeline affiche l’état des services et les cent dernières lignes de journal.
+Contrôlez ensuite sur le serveur :
 
 ```sh
 docker ps --filter name=lxp
+docker logs --tail=100 lxp-app
 ```
 
-Le mode direct nomme ses conteneurs `lxp-app-1` et `lxp-ai-1`. Le mode Caddy
-utilise `lxp-app` et `lxp-ai`. Utilisez le nom affiché par `docker ps` avec
-`docker logs --tail=100 <conteneur>`.
+Les conteneurs portent le nom de la stack : `lxp-app`, `lxp-ai`, `lxp-db-pg`,
+`lxp-db-mongo`, `lxp-db-ai`.
 
 Adaptez le test public au mode choisi :
 
 ```sh
-curl --fail --head http://<adresse-du-vps>
+curl --fail --head http://<adresse-du-serveur>
 curl --fail --head https://lxp.dev.step.eco
 ```
 
 Pour le mode Caddy, ouvrez `https://dev.step.eco` et contrôlez la carte **LXP**
-dans le groupe **Applications**. Une réponse `403` indique que l'adresse du
+dans le groupe **Applications**. Une réponse `403` indique que l’adresse du
 poste ne figure pas dans `dev_access`. Une réponse `502` demande de contrôler le
 healthcheck de `app`, son port et son raccordement au réseau `caddy`.
+
+## Diagnostic
+
+| Symptôme                                                     | Contrôle à faire                                                                 |
+| ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
+| `La CLI Infisical n’est pas installée sur l’agent`           | installer le paquet `infisical` sur l’agent Jenkins                               |
+| `Infisical n’a renvoyé aucun jeton`                          | Client ID, Client Secret, et droits de l’identité sur l’environnement visé        |
+| `Variables d’environnement manquantes : …`                   | comparer les clés de `/runtime` avec `deployment/env.example`                     |
+| `Un fichier .env se trouve à la racine du dépôt`             | un `.env` traîne dans le workspace de l’agent ; le supprimer                      |
+| `required variable … is missing a value`                     | la variable manque dans Infisical et le Compose la déclare `${VAR:?}`             |
+| Une image inattendue est déployée                            | une métadonnée `LXP_*` se trouve dans Infisical ; la retirer                      |
+| `docker: permission denied`                                  | accès au démon Docker pour le compte Jenkins et pour le compte SSH du serveur     |
+
+## Revenir à une version précédente
+
+Chaque build publie l’image sous le SHA de son commit. Relancez le job de
+déploiement en renseignant `LXP_IMAGE_TAG` avec ce SHA, après avoir contrôlé la
+compatibilité des migrations.
+
+## Checklist
+
+- [ ] La CLI `infisical` est installée sur les agents Jenkins.
+- [ ] Une Machine Identity existe par instance, avec `/ci` et `/runtime` en
+      lecture sur son seul environnement.
+- [ ] Le credential `INFISICAL_LXP` porte le Client ID et le Client Secret.
+- [ ] Aucune métadonnée `LXP_*`, `DEPLOY_PATH` ou `APP_HOST` ne figure dans
+      Infisical.
+- [ ] Les anciens credentials `APP_ENV`, `APP_DOMAIN`, `SSH_*` et
+      `DOCKER_REGISTRY` sont supprimés après validation.
+- [ ] Le serveur cible ne contient que `data/`, `uploads/` et `logs/`.
+- [ ] Un déploiement de démonstration a été contrôlé, sans conteneur `ai`.

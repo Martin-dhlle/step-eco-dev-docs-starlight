@@ -16,7 +16,8 @@ kanban
     dns[Configuration DNS]
   done[Documenté]
     appDeployment[Publication d'une application sur le VPS]
-    secretManagement[Gestion des secrets avec Infisical et Docker Compose]
+    secretManagement[Gestion des secrets avec Infisical]
+    multiTenant[Instances clientes par dossier Infisical]
     lxpJenkins[LXP - déploiement avec Jenkins]
     lxpActions[LXP - déploiement avec GitHub Actions]
 ```
