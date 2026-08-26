@@ -51,14 +51,14 @@ l’autre et que le pipeline ne sait pas la calculer, elle va dans `/runtime`.
 Deux topologies coexistent. La règle ci-dessus ne change pas ; le point où les
 secrets entrent dans le déploiement, si.
 
-| Critère                          | Mécanique A — stack hébergée | Mécanique B — CI pilote Docker  |
-| -------------------------------- | ---------------------------- | ------------------------------- |
-| Fichiers Compose                  | sur le serveur               | dans le dépôt, sur le runner    |
-| Qui crée les conteneurs           | le serveur                   | le runner, par `DOCKER_HOST`    |
-| Qui lit `/runtime`                | le serveur                   | le runner                       |
-| Qui lit `/ci`                     | la CI                        | le runner                       |
-| Amorçage sur le serveur           | fichier `.credentials`       | aucun                           |
-| Le serveur héberge               | Compose, `.deploy.env`, données | les données seules           |
+| Critère                 | Mécanique A — stack hébergée    | Mécanique B — CI pilote Docker |
+| ----------------------- | ------------------------------- | ------------------------------ |
+| Fichiers Compose        | sur le serveur                  | dans le dépôt, sur le runner   |
+| Qui crée les conteneurs | le serveur                      | le runner, par `DOCKER_HOST`   |
+| Qui lit `/runtime`      | le serveur                      | le runner                      |
+| Qui lit `/ci`           | la CI                           | le runner                      |
+| Amorçage sur le serveur | fichier `.credentials`          | aucun                          |
+| Le serveur héberge      | Compose, `.deploy.env`, données | les données seules             |
 
 La mécanique A convient à une application déployée et redémarrée depuis le
 serveur. La mécanique B convient à un pipeline qui construit une image, la
@@ -99,7 +99,7 @@ clés dans tous les environnements, avec des valeurs propres à chacun.
 ├── dev
 │   ├── /ci
 │   └── /runtime
-├── staging
+├── pre-prod
 │   ├── /ci
 │   └── /runtime
 └── prod
@@ -160,13 +160,13 @@ correspondant.
 
 ### Matrice d’accès
 
-| Identité                        | Environnement | Chemins             | Droit                              |
-| ------------------------------- | ------------- | ------------------- | ---------------------------------- |
-| Développeur du projet           | `dev`         | `/runtime`          | lecture et écriture selon son rôle |
-| `<application>-dev-vps`         | `dev`         | `/runtime`          | lecture                            |
-| `<application>-github`          | `dev`         | `/ci` et `/runtime` | lecture                            |
-| `<application>-prod-demo`       | `prod`        | `/demo`             | lecture                            |
-| `<application>-prod-<slug>`     | `prod`        | `/clients/<slug>`   | lecture                            |
+| Identité                    | Environnement | Chemins             | Droit                              |
+| --------------------------- | ------------- | ------------------- | ---------------------------------- |
+| Développeur du projet       | `dev`         | `/runtime`          | lecture et écriture selon son rôle |
+| `<application>-dev-vps`     | `dev`         | `/runtime`          | lecture                            |
+| `<application>-github`      | `dev`         | `/ci` et `/runtime` | lecture                            |
+| `<application>-prod-demo`   | `prod`        | `/demo`             | lecture                            |
+| `<application>-prod-<slug>` | `prod`        | `/clients/<slug>`   | lecture                            |
 
 Créez une Machine Identity par application, environnement et consommateur. Une
 identité de développement ne doit pas lire les secrets de production, et
@@ -300,6 +300,7 @@ configuration. Faites échouer le script de déploiement s’il en trouve un :
 ```sh
 [ ! -f .env ] || { echo "Un fichier .env traîne dans le dépôt." >&2; exit 1; }
 ```
+
 :::
 
 Une variable de conteneur apparaît dans `docker inspect` et peut atteindre les
@@ -461,13 +462,13 @@ donc disparaître, y compris la clé SSH de déploiement et le jeton du registre
 
 Configurez l’identité en OIDC Auth :
 
-| Champ                | Valeur                                            |
-| -------------------- | ------------------------------------------------- |
-| Discovery URL        | `https://token.actions.githubusercontent.com`     |
-| Issuer               | `https://token.actions.githubusercontent.com`     |
-| Audience (`aud`)     | `https://github.com/StudioFabrique`               |
-| Subject (`sub`)      | `repo:StudioFabrique/<depot>:environment:<env>`   |
-| Access Token TTL     | 600 s                                             |
+| Champ            | Valeur                                          |
+| ---------------- | ----------------------------------------------- |
+| Discovery URL    | `https://token.actions.githubusercontent.com`   |
+| Issuer           | `https://token.actions.githubusercontent.com`   |
+| Audience (`aud`) | `https://github.com/StudioFabrique`             |
+| Subject (`sub`)  | `repo:StudioFabrique/<depot>:environment:<env>` |
+| Access Token TTL | 600 s                                           |
 
 Le workflow accorde `id-token: write`, puis récupère les deux chemins :
 

@@ -15,7 +15,7 @@ Identity, et aucun ne porte plus de fichier d’environnement.
 Le mode Caddy ne déploie aucun conteneur Caddy. Le proxy reste dans
 `/home/martin/caddy-step-http` et lit les labels Docker.
 
-Les bases utilisent le réseau interne de la stack. Le service IA rejoint ce
+Les bases de données utilisent le réseau interne de la stack. Le service IA rejoint ce
 réseau et un réseau de sortie dédié aux API Mistral et Hugging Face. Aucun de
 ces services ne publie de port sur l’hôte.
 
@@ -114,17 +114,17 @@ dans le coffre entretient une source de vérité fausse.
 Les trois Jenkinsfile exposent leurs valeurs non sensibles en paramètres. Un job
 paramétré remplace ainsi un job par instance.
 
-| Paramètre                | Rôle                                                             |
-| ------------------------ | ---------------------------------------------------------------- |
-| `INFISICAL_CREDENTIAL_ID`| `INFISICAL_CREDENTIALS`, sauf job hors dossier                     |
-| `INFISICAL_PROJECT_ID`   | Project ID du projet LXP                                          |
-| `INFISICAL_ENVIRONMENT`  | slug Infisical : `dev`, `staging` ou `prod`                       |
-| `INFISICAL_PATH_PREFIX`  | vide, `/demo`, ou `/clients/<slug>` pour une instance cliente     |
-| `DEPLOY_PATH`            | répertoire persistant sur le serveur cible                        |
-| `LXP_DEPLOYMENT_NAME`    | nom stable de la stack, de ses conteneurs et de ses volumes       |
-| `APP_HOST`               | domaine sans protocole, mode Caddy uniquement                     |
-| `LXP_IMAGE_TAG`          | `latest`, ou un tag précis pour un retour arrière                 |
-| `LXP_AI_IMAGE_TAG`       | tag de l’image ANDRIA-IA                                          |
+| Paramètre                 | Rôle                                                          |
+| ------------------------- | ------------------------------------------------------------- |
+| `INFISICAL_CREDENTIAL_ID` | `INFISICAL_CREDENTIALS`, sauf job hors dossier                |
+| `INFISICAL_PROJECT_ID`    | Project ID du projet LXP                                      |
+| `INFISICAL_ENVIRONMENT`   | slug Infisical : `dev`, `pre-prod` ou `prod`                  |
+| `INFISICAL_PATH_PREFIX`   | vide, `/demo`, ou `/clients/<slug>` pour une instance cliente |
+| `DEPLOY_PATH`             | répertoire persistant sur le serveur cible                    |
+| `LXP_DEPLOYMENT_NAME`     | nom stable de la stack, de ses conteneurs et de ses volumes   |
+| `APP_HOST`                | domaine sans protocole, mode Caddy uniquement                 |
+| `LXP_IMAGE_TAG`           | `latest`, ou un tag précis pour un retour arrière             |
+| `LXP_AI_IMAGE_TAG`        | tag de l’image ANDRIA-IA                                      |
 
 :::caution[Point d’attention]
 `LXP_DEPLOYMENT_NAME` nomme les volumes. Le modifier sur une instance existante
@@ -202,15 +202,15 @@ healthcheck de `app`, son port et son raccordement au réseau `caddy`.
 
 ## Diagnostic
 
-| Symptôme                                                     | Contrôle à faire                                                                 |
-| ------------------------------------------------------------ | -------------------------------------------------------------------------------- |
-| `La CLI Infisical n’est pas installée sur l’agent`           | installer le paquet `infisical` sur l’agent Jenkins                               |
-| `Infisical n’a renvoyé aucun jeton`                          | Client ID, Client Secret, et droits de l’identité sur l’environnement visé        |
-| `Variables d’environnement manquantes : …`                   | comparer les clés de `/runtime` avec `deployment/env.example`                     |
-| `Un fichier .env se trouve à la racine du dépôt`             | un `.env` traîne dans le workspace de l’agent ; le supprimer                      |
-| `required variable … is missing a value`                     | la variable manque dans Infisical et le Compose la déclare `${VAR:?}`             |
-| Une image inattendue est déployée                            | une métadonnée `LXP_*` se trouve dans Infisical ; la retirer                      |
-| `docker: permission denied`                                  | accès au démon Docker pour le compte Jenkins et pour le compte SSH du serveur     |
+| Symptôme                                           | Contrôle à faire                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `La CLI Infisical n’est pas installée sur l’agent` | installer le paquet `infisical` sur l’agent Jenkins                           |
+| `Infisical n’a renvoyé aucun jeton`                | Client ID, Client Secret, et droits de l’identité sur l’environnement visé    |
+| `Variables d’environnement manquantes : …`         | comparer les clés de `/runtime` avec `deployment/env.example`                 |
+| `Un fichier .env se trouve à la racine du dépôt`   | un `.env` traîne dans le workspace de l’agent ; le supprimer                  |
+| `required variable … is missing a value`           | la variable manque dans Infisical et le Compose la déclare `${VAR:?}`         |
+| Une image inattendue est déployée                  | une métadonnée `LXP_*` se trouve dans Infisical ; la retirer                  |
+| `docker: permission denied`                        | accès au démon Docker pour le compte Jenkins et pour le compte SSH du serveur |
 
 ## Revenir à une version précédente
 
