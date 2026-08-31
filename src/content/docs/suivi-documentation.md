@@ -18,8 +18,6 @@ kanban
     appDeployment[Publication d'une application sur le VPS]
     secretManagement[Gestion des secrets avec Infisical]
     multiTenant[Instances clientes par dossier Infisical]
-    lxpJenkins[LXP - déploiement avec Jenkins]
-    lxpActions[LXP - déploiement avec GitHub Actions]
 ```
 
 Mettez ce tableau à jour dans le même changement que la page concernée. Les cartes **En cours** correspondent à des pages présentes mais incomplètes. Les cartes **À documenter** n’ont pas encore de page dédiée.
